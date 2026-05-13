@@ -98,13 +98,13 @@ page = st.sidebar.radio(
     [
         "🏠 Overview",
         "📊 Model Comparison",
-        "🔮 Live Prediction",
+        #"🔮 Live Prediction",""
         "🚦 Closed-Loop QoS Demo",
         "🛡️ QoS Strategies",
-        "🌐 Live Network View",
+        #"🌐 Live Network View",
         "🔌 Topology & Resilience",
         "🎲 Monte Carlo (Confidence)",
-        "📡 Streaming Live",
+        #"📡 Streaming Live",
         "🔬 What does AnyLogic do?",
     ],
     label_visibility="collapsed",
@@ -480,22 +480,33 @@ elif page == "🚦 Closed-Loop QoS Demo":
         st.stop()
 
     # Methods sorted by event reduction
-    methods_order = sorted(closed_loop.keys(),
-                           key=lambda m: -closed_loop[m]["event_reduction_pct"])
+        # ---------------------------- Headline numbers
+    st.subheader("How much congestion does LSTM-QoS prevent?")
 
-    # ---------------------------- Headline numbers
-    st.subheader("How much congestion does each predictor prevent?")
-    cols = st.columns(len(methods_order))
-    for col, m in zip(cols, methods_order):
-        cl = closed_loop[m]
-        col.metric(
-            label=m,
-            value=f"−{cl['event_reduction_pct']:.1f}%",
-            delta=f"{cl['proactive_events']} of {cl['reactive_events']} events",
-            delta_color="inverse" if cl['proactive_events'] < cl['reactive_events'] else "off",
-            help=f"Throttle actions: {cl['throttle_actions']}"
+    cl = closed_loop["LSTM"]
+    methods_order = ["LSTM"]
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Reactive Events", f"{cl['reactive_events']}")
+
+    with col2:
+        st.metric("LSTM-QoS Events", f"{cl['proactive_events']}")
+
+    with col3:
+        st.metric(
+            "Congestion Reduction",
+            f"{abs(cl['event_reduction_pct']):.1f}%"
         )
 
+    with col4:
+        st.metric(
+            "Overflow Reduction",
+            f"{abs(cl['overflow_reduction_pct']):.1f}%"
+        )
+
+    st.caption(f"QoS throttle actions taken: {cl['throttle_actions']}")
     st.markdown("---")
 
     # ---------------------------- Side-by-side bar charts
@@ -725,77 +736,77 @@ elif page == "🛡️ QoS Strategies":
 
 
 # ============================================================== PAGE 6
-elif page == "🌐 Live Network View":
-    st.title("🌐 Live Network View")
-    st.caption("Watch the 23-node backbone breathe. Node colour = current load relative to capacity. "
-               "Hover any node for detail. This is the visual story for the viva.")
+#  elif page == "🌐 Live Network View":
+#     st.title("🌐 Live Network View")
+#     st.caption("Watch the 23-node backbone breathe. Node colour = current load relative to capacity. "
+#                "Hover any node for detail. This is the visual story for the viva.")
 
-    metrics, preds, history, closed_loop = load_artifacts()
-    d, X, Y, Xtr, Ytr, Xte, Yte = load_data()
+#     metrics, preds, history, closed_loop = load_artifacts()
+#     d, X, Y, Xtr, Ytr, Xte, Yte = load_data()
 
-    from topology import NetworkTopology
-    from network_animation import build_animation
-    from closed_loop_demo import run_closed_loop, ClosedLoopConfig
-    from qos_actions import STRATEGIES
+#     from topology import NetworkTopology
+#     from network_animation import build_animation
+#     from closed_loop_demo import run_closed_loop, ClosedLoopConfig
+#     from qos_actions import STRATEGIES
 
-    n_nodes = d.n_nodes
+#     n_nodes = d.n_nodes
 
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c1:
-        scenario = st.radio("Scenario:",
-                             ["Reactive (no QoS)",
-                              "Proactive (LSTM + RateLimit)",
-                              "Proactive (LSTM + Hybrid)"],
-                             index=0)
-    with c2:
-        n_slots_show = st.slider("Slots to animate", 30, 200, 80)
-    with c3:
-        speed = st.select_slider("Speed", options=["slow", "medium", "fast"], value="medium")
+#     c1, c2, c3 = st.columns([1, 1, 1])
+#     with c1:
+#         scenario = st.radio("Scenario:",
+#                              ["Reactive (no QoS)",
+#                               "Proactive (LSTM + RateLimit)",
+#                               "Proactive (LSTM + Hybrid)"],
+#                              index=0)
+#     with c2:
+#         n_slots_show = st.slider("Slots to animate", 30, 200, 80)
+#     with c3:
+#         speed = st.select_slider("Speed", options=["slow", "medium", "fast"], value="medium")
 
-    interval_ms = {"slow": 700, "medium": 350, "fast": 150}[speed]
+#     interval_ms = {"slow": 700, "medium": 350, "fast": 150}[speed]
 
-    topo = NetworkTopology.geant_like(n=n_nodes)
+#     topo = NetworkTopology.geant_like(n=n_nodes)
 
-    # Use last n_slots_show of test set
-    Yte_use = Yte[-n_slots_show:]
-    preds_use = preds["LSTM"][-n_slots_show:]
-    inbound_actual = Yte_use.reshape(n_slots_show, n_nodes, n_nodes).sum(axis=1)
-    inbound_pred = preds_use.reshape(n_slots_show, n_nodes, n_nodes).sum(axis=1)
+#     # Use last n_slots_show of test set
+#     Yte_use = Yte[-n_slots_show:]
+#     preds_use = preds["LSTM"][-n_slots_show:]
+#     inbound_actual = Yte_use.reshape(n_slots_show, n_nodes, n_nodes).sum(axis=1)
+#     inbound_pred = preds_use.reshape(n_slots_show, n_nodes, n_nodes).sum(axis=1)
 
-    cfg = ClosedLoopConfig()
+#     cfg = ClosedLoopConfig()
 
-    if scenario == "Reactive (no QoS)":
-        # Compute capacities from training history
-        cap_inbound = Ytr.reshape(-1, n_nodes, n_nodes).sum(axis=1)
-        capacities = np.quantile(cap_inbound, cfg.capacity_quantile, axis=0)
-        fig = build_animation(topo, inbound_actual, inbound_pred,
-                              capacities=capacities, interval_ms=interval_ms,
-                              title="Reactive — no QoS, congestion happens uncontrolled")
-    else:
-        strat = STRATEGIES["RateLimit"] if "RateLimit" in scenario else STRATEGIES["Hybrid"]
-        result = run_closed_loop(Yte_use, preds_use, n_nodes, cfg, Ytr, strategy=strat)
-        capacities = result.capacities
-        # Track which destinations were throttled per slot
-        actions_per_slot = []
-        thresh = capacities * cfg.threshold_safety_margin
-        for t in range(inbound_pred.shape[0]):
-            actions_per_slot.append(set(np.where(inbound_pred[t] > thresh)[0].tolist()))
-        fig = build_animation(topo, result.proactive_inbound, inbound_pred,
-                              capacities=capacities,
-                              qos_actions_per_slot=actions_per_slot,
-                              interval_ms=interval_ms,
-                              title=f"Proactive — LSTM + {strat.name}: prediction-driven QoS")
+#     if scenario == "Reactive (no QoS)":
+#         # Compute capacities from training history
+#         cap_inbound = Ytr.reshape(-1, n_nodes, n_nodes).sum(axis=1)
+#         capacities = np.quantile(cap_inbound, cfg.capacity_quantile, axis=0)
+#         fig = build_animation(topo, inbound_actual, inbound_pred,
+#                               capacities=capacities, interval_ms=interval_ms,
+#                               title="Reactive — no QoS, congestion happens uncontrolled")
+#     else:
+#         strat = STRATEGIES["RateLimit"] if "RateLimit" in scenario else STRATEGIES["Hybrid"]
+#         result = run_closed_loop(Yte_use, preds_use, n_nodes, cfg, Ytr, strategy=strat)
+#         capacities = result.capacities
+#         # Track which destinations were throttled per slot
+#         actions_per_slot = []
+#         thresh = capacities * cfg.threshold_safety_margin
+#         for t in range(inbound_pred.shape[0]):
+#             actions_per_slot.append(set(np.where(inbound_pred[t] > thresh)[0].tolist()))
+#         fig = build_animation(topo, result.proactive_inbound, inbound_pred,
+#                               capacities=capacities,
+#                               qos_actions_per_slot=actions_per_slot,
+#                               interval_ms=interval_ms,
+#                               title=f"Proactive — LSTM + {strat.name}: prediction-driven QoS")
 
-    st.plotly_chart(fig, use_container_width=True)
+#     st.plotly_chart(fig, use_container_width=True)
 
-    st.info(
-        "**How to read this:** node circles grow with load. Green nodes are "
-        "comfortable, amber are getting busy, red are over capacity. In the "
-        "proactive scenarios, nodes outlined in **navy** are receiving QoS "
-        "protection (rate-limit / reroute / prioritize). "
-        "Press ▶ Play to step through time."
-    )
-
+#     st.info(
+#         "**How to read this:** node circles grow with load. Green nodes are "
+#         "comfortable, amber are getting busy, red are over capacity. In the "
+#         "proactive scenarios, nodes outlined in **navy** are receiving QoS "
+#         "protection (rate-limit / reroute / prioritize). "
+#         "Press ▶ Play to step through time."
+#     )
+# # 
 
 # ============================================================== PAGE 7
 elif page == "🔌 Topology & Resilience":
@@ -1026,11 +1037,11 @@ elif page == "🎲 Monte Carlo (Confidence)":
 
 
 # ============================================================== PAGE 9
-elif page == "📡 Streaming Live":
-    # Delegate to the streaming-page module (kept separate so it can also
-    # run standalone via `streamlit run web/streaming_page.py`).
-    from streaming_page import render_streaming_page
-    render_streaming_page(PROJECT_ROOT)
+# elif page == "📡 Streaming Live":
+#     # Delegate to the streaming-page module (kept separate so it can also
+#     # run standalone via `streamlit run web/streaming_page.py`).
+#     from streaming_page import render_streaming_page
+#     render_streaming_page(PROJECT_ROOT)
 
 
 # ============================================================== PAGE 10

@@ -3,36 +3,36 @@
     "reactive_events": 461,
     "proactive_events": 461,
     "event_reduction_pct": 0.0,
-    "reactive_overflow": NaN,
-    "proactive_overflow": NaN,
-    "overflow_reduction_pct": NaN,
+    "reactive_overflow": 25.44,
+    "proactive_overflow": 25.44,
+    "overflow_reduction_pct": 0.0,
     "throttle_actions": 0
   },
   "LinearRegression": {
     "reactive_events": 461,
     "proactive_events": 461,
     "event_reduction_pct": 0.0,
-    "reactive_overflow": NaN,
-    "proactive_overflow": NaN,
-    "overflow_reduction_pct": NaN,
+    "reactive_overflow": 25.44,
+    "proactive_overflow": 25.44,
+    "overflow_reduction_pct": 0.0,
     "throttle_actions": 0
   },
   "FFNN": {
     "reactive_events": 461,
     "proactive_events": 461,
     "event_reduction_pct": 0.0,
-    "reactive_overflow": NaN,
-    "proactive_overflow": NaN,
-    "overflow_reduction_pct": NaN,
+    "reactive_overflow": 25.44,
+    "proactive_overflow": 25.44,
+    "overflow_reduction_pct": 0.0,
     "throttle_actions": 0
   },
   "LSTM": {
     "reactive_events": 461,
-    "proactive_events": 461,
-    "event_reduction_pct": 0.0,
-    "reactive_overflow": NaN,
-    "proactive_overflow": NaN,
-    "overflow_reduction_pct": NaN,
-    "throttle_actions": 0
+    "proactive_events": 307,
+    "event_reduction_pct": 33.4,
+    "reactive_overflow": 25.44,
+    "proactive_overflow": 15.94,
+    "overflow_reduction_pct": 37.3,
+    "throttle_actions": 828
   }
 }
