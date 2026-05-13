@@ -1,0 +1,223 @@
+{
+  "node_failure": {
+    "baseline_mse": NaN,
+    "per_node": [
+      {
+        "failed_node": 0,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 1,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 2,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 3,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 4,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 5,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 6,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 7,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 8,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 9,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 10,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 11,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 12,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 13,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 14,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 15,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 16,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 17,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 18,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 19,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 20,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 21,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      },
+      {
+        "failed_node": 22,
+        "mse": NaN,
+        "mse_delta_pct": 0.0,
+        "connectivity_pct": 100.0
+      }
+    ]
+  },
+  "link_cut": {
+    "baseline_mse": NaN,
+    "per_k_cuts": [
+      {
+        "n_cuts": 0,
+        "mse_mean": NaN,
+        "mse_std": NaN,
+        "connectivity_mean": 100.0,
+        "connectivity_std": 0.0,
+        "mse_delta_pct": 0.0
+      },
+      {
+        "n_cuts": 1,
+        "mse_mean": NaN,
+        "mse_std": NaN,
+        "connectivity_mean": 100.0,
+        "connectivity_std": 0.0,
+        "mse_delta_pct": 0.0
+      },
+      {
+        "n_cuts": 2,
+        "mse_mean": NaN,
+        "mse_std": NaN,
+        "connectivity_mean": 100.0,
+        "connectivity_std": 0.0,
+        "mse_delta_pct": 0.0
+      },
+      {
+        "n_cuts": 3,
+        "mse_mean": NaN,
+        "mse_std": NaN,
+        "connectivity_mean": 100.0,
+        "connectivity_std": 0.0,
+        "mse_delta_pct": 0.0
+      },
+      {
+        "n_cuts": 4,
+        "mse_mean": NaN,
+        "mse_std": NaN,
+        "connectivity_mean": 100.0,
+        "connectivity_std": 0.0,
+        "mse_delta_pct": 0.0
+      },
+      {
+        "n_cuts": 5,
+        "mse_mean": NaN,
+        "mse_std": NaN,
+        "connectivity_mean": 100.0,
+        "connectivity_std": 0.0,
+        "mse_delta_pct": 0.0
+      },
+      {
+        "n_cuts": 6,
+        "mse_mean": NaN,
+        "mse_std": NaN,
+        "connectivity_mean": 100.0,
+        "connectivity_std": 0.0,
+        "mse_delta_pct": 0.0
+      },
+      {
+        "n_cuts": 7,
+        "mse_mean": NaN,
+        "mse_std": NaN,
+        "connectivity_mean": 100.0,
+        "connectivity_std": 0.0,
+        "mse_delta_pct": 0.0
+      },
+      {
+        "n_cuts": 8,
+        "mse_mean": NaN,
+        "mse_std": NaN,
+        "connectivity_mean": 100.0,
+        "connectivity_std": 0.0,
+        "mse_delta_pct": 0.0
+      }
+    ]
+  },
+  "n_links": 69
+}

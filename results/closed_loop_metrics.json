@@ -1,0 +1,38 @@
+{
+  "ARMA": {
+    "reactive_events": 461,
+    "proactive_events": 461,
+    "event_reduction_pct": 0.0,
+    "reactive_overflow": NaN,
+    "proactive_overflow": NaN,
+    "overflow_reduction_pct": NaN,
+    "throttle_actions": 0
+  },
+  "LinearRegression": {
+    "reactive_events": 461,
+    "proactive_events": 461,
+    "event_reduction_pct": 0.0,
+    "reactive_overflow": NaN,
+    "proactive_overflow": NaN,
+    "overflow_reduction_pct": NaN,
+    "throttle_actions": 0
+  },
+  "FFNN": {
+    "reactive_events": 461,
+    "proactive_events": 461,
+    "event_reduction_pct": 0.0,
+    "reactive_overflow": NaN,
+    "proactive_overflow": NaN,
+    "overflow_reduction_pct": NaN,
+    "throttle_actions": 0
+  },
+  "LSTM": {
+    "reactive_events": 461,
+    "proactive_events": 461,
+    "event_reduction_pct": 0.0,
+    "reactive_overflow": NaN,
+    "proactive_overflow": NaN,
+    "overflow_reduction_pct": NaN,
+    "throttle_actions": 0
+  }
+}

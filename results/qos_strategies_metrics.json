@@ -1,0 +1,47 @@
+{
+  "NoAction": {
+    "reactive_events": 468,
+    "proactive_events": 468,
+    "event_reduction_pct": 0.0,
+    "reactive_overflow": 36.40374755859375,
+    "proactive_overflow": 36.40374755859375,
+    "overflow_reduction_pct": 0.0,
+    "throttle_actions": 0
+  },
+  "RateLimit": {
+    "reactive_events": 468,
+    "proactive_events": 215,
+    "event_reduction_pct": 54.05982905982906,
+    "reactive_overflow": 36.40374755859375,
+    "proactive_overflow": 14.631113052368164,
+    "overflow_reduction_pct": 59.808772355597135,
+    "throttle_actions": 1439
+  },
+  "Reroute": {
+    "reactive_events": 468,
+    "proactive_events": 687,
+    "event_reduction_pct": -46.794871794871796,
+    "reactive_overflow": 36.40374755859375,
+    "proactive_overflow": 49.915374755859375,
+    "overflow_reduction_pct": -37.11603365977074,
+    "throttle_actions": 597
+  },
+  "Prioritize": {
+    "reactive_events": 468,
+    "proactive_events": 225,
+    "event_reduction_pct": 51.92307692307692,
+    "reactive_overflow": 36.40374755859375,
+    "proactive_overflow": 20.69566535949707,
+    "overflow_reduction_pct": 43.14962950947205,
+    "throttle_actions": 23509
+  },
+  "Hybrid": {
+    "reactive_events": 468,
+    "proactive_events": 44,
+    "event_reduction_pct": 90.5982905982906,
+    "reactive_overflow": 36.40374755859375,
+    "proactive_overflow": 9.094428062438965,
+    "overflow_reduction_pct": 75.01787955264494,
+    "throttle_actions": 35020
+  }
+}
