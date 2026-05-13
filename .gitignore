@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Java
+*.class
+
+# Training artifacts (regenerate with train.py)
+results/
+results_test/
+
+# Large generated data
+data/*.csv
+!data/README.md
+
+# AnyLogic outputs
+anylogic/**/output/
+anylogic/**/*.log
+anylogic/**/traffic_matrix.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.iml

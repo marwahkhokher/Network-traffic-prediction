@@ -1,0 +1,1450 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+*************************************************
+	         AnyLogic Project File
+*************************************************
+-->
+<AnyLogicWorkspace WorkspaceVersion="1.9" AnyLogicVersion="8.9.8.202602271015" AlpVersion="8.9.7">
+<Model>
+	<Id>1777266202195</Id>
+	<Name><![CDATA[NetworkTrafficSim]]></Name>
+	<EngineVersion>6</EngineVersion>
+	<JavaPackageName><![CDATA[networktrafficsim]]></JavaPackageName>
+	<ModelTimeUnit><![CDATA[Minute]]></ModelTimeUnit>
+	<Folders>
+	</Folders>
+	<ActiveObjectClasses>
+		<!--   =========   Active Object Class   ========  -->
+		<ActiveObjectClass>
+			<Id>1777266202199</Id>
+			<Name><![CDATA[Main]]></Name>
+			<AdditionalClassCode><![CDATA[java.util.Random rng;
+double[][] baseMatrix;
+double[] nodePopulation;
+double[][] nodeDistance;
+final double BURST_AR = 0.6;
+final double NOISE_SD = 0.08;
+
+// ====== Live-LSTM integration state ======
+// HTTP client used to talk to the FastAPI prediction service
+java.net.http.HttpClient httpClient;
+java.time.Duration       httpTimeout = java.time.Duration.ofSeconds(2);
+
+// Pre-QoS matrix (what nature wanted to send) vs post-QoS (what actually flows)
+double[][] rawTrafficMatrix;
+
+// Most recent congestion flags from the service
+java.util.List<Integer> overloadedDests = new java.util.ArrayList<Integer>();
+
+// Counters for the trace + final summary
+int    lstmCallsOk     = 0;
+int    lstmCallsFailed = 0;
+int    qosActionsTotal = 0;
+int    congestionEventsAvoided = 0;
+double overflowBefore  = 0.0;
+double overflowAfter   = 0.0;]]></AdditionalClassCode>
+			<StartupCode><![CDATA[rng = new java.util.Random(seed);
+
+// Allocate state
+trafficMatrix   = new double[N][N];
+eventMultiplier = new double[N][N];
+eventTtl        = new int[N][N];
+burstState      = new double[N][N];
+for (int i = 0; i < N; i++)
+    for (int j = 0; j < N; j++)
+        eventMultiplier[i][j] = 1.0;
+
+// Build the gravity-model base matrix
+nodePopulation = new double[N];
+for (int i = 0; i < N; i++) nodePopulation[i] = 0.3 + 0.7 * rng.nextDouble();
+
+double[][] coords = new double[N][2];
+for (int i = 0; i < N; i++) {
+    coords[i][0] = 100.0 * rng.nextDouble();
+    coords[i][1] = 100.0 * rng.nextDouble();
+}
+nodeDistance = new double[N][N];
+baseMatrix   = new double[N][N];
+double maxBase = 0.0;
+for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+        if (i == j) { nodeDistance[i][j] = 1.0; continue; }
+        double dx = coords[i][0] - coords[j][0];
+        double dy = coords[i][1] - coords[j][1];
+        double d  = Math.sqrt(dx * dx + dy * dy);
+        nodeDistance[i][j] = Math.max(d, 1.0);
+        double b = (nodePopulation[i] * nodePopulation[j]) / Math.pow(d, 1.2);
+        baseMatrix[i][j] = b;
+        if (b > maxBase) maxBase = b;
+    }
+}
+// normalise so max base = 1.0
+if (maxBase > 0) {
+    for (int i = 0; i < N; i++)
+        for (int j = 0; j < N; j++)
+            baseMatrix[i][j] /= maxBase;
+}
+for (int i = 0; i < N; i++) baseMatrix[i][i] = 0.0;
+
+// Assign IDs and populations to the node agents
+for (int i = 0; i < N; i++) {
+    NetworkNode nd = nodes.get(i);
+    nd.nodeId = i;
+    nd.population = nodePopulation[i];
+}
+
+// Allocate the pre-QoS twin matrix
+rawTrafficMatrix = new double[N][N];
+
+// Initialise the HTTP client used to call the local FastAPI prediction service.
+// IMPORTANT: force HTTP/1.1 — uvicorn doesn't speak HTTP/2 upgrade, and the
+// default JDK client tries h2c which causes the server to reject the body.
+httpClient = java.net.http.HttpClient.newBuilder()
+        .version(java.net.http.HttpClient.Version.HTTP_1_1)
+        .connectTimeout(java.time.Duration.ofSeconds(2))
+        .build();
+
+openCsv();
+traceln("Simulation started: N=" + N + ", interval=" + intervalMin + "min");
+traceln("LSTM service URL = " + lstmServiceUrl);
+traceln("LSTM integration  = " + (enableLstmCalls ? "ENABLED" : "disabled"));
+traceln("QoS strategy      = " + qosStrategy);]]></StartupCode>
+			<DestroyCode><![CDATA[closeCsv();
+traceln("=== LSTM integration summary ===");
+traceln("  predictions OK    : " + lstmCallsOk);
+traceln("  predictions FAIL  : " + lstmCallsFailed);
+traceln("  QoS actions taken : " + qosActionsTotal);
+traceln("  overflow BEFORE   : " + String.format(java.util.Locale.US, "%.3f", overflowBefore));
+traceln("  overflow AFTER    : " + String.format(java.util.Locale.US, "%.3f", overflowAfter));
+if (overflowBefore > 0) {
+    double pct = 100.0 * (overflowBefore - overflowAfter) / overflowBefore;
+    traceln("  overflow reduced  : " + String.format(java.util.Locale.US, "%.1f%%", pct));
+}]]></DestroyCode>
+			<Generic>false</Generic>
+			<GenericParameter>
+				<Id>1777266202204</Id>
+				<Name><![CDATA[1777266202204]]></Name>
+				<GenericParameterValue Class="CodeValue">
+					<Code><![CDATA[T extends Agent]]></Code>
+				</GenericParameterValue>
+				<GenericParameterLabel><![CDATA[Generic parameter:]]></GenericParameterLabel>
+			</GenericParameter>
+			<FlowChartsUsage>ENTITY</FlowChartsUsage>
+			<SamplesToKeep>100</SamplesToKeep>
+			<LimitNumberOfArrayElements>false</LimitNumberOfArrayElements>
+			<ElementsLimitValue>100</ElementsLimitValue>
+			<MakeDefaultViewArea>true</MakeDefaultViewArea>
+			<SceneGridColor/>
+			<SceneBackgroundColor>-4144960</SceneBackgroundColor>
+			<SceneSkybox>null</SceneSkybox>
+			<AgentProperties>
+				<EnvironmentDefinesInitialLocation>true</EnvironmentDefinesInitialLocation>
+				<RotateAnimationTowardsMovement>true</RotateAnimationTowardsMovement>
+				<RotateAnimationVertically>false</RotateAnimationVertically>
+				<VelocityCode Class="CodeUnitValue">
+					<Code><![CDATA[10]]></Code>
+					<Unit Class="SpeedUnits"><![CDATA[MPS]]></Unit>
+				</VelocityCode>
+				<PhysicalLength Class="CodeUnitValue">
+					<Code><![CDATA[1]]></Code>
+					<Unit Class="LengthUnits"><![CDATA[METER]]></Unit>
+				</PhysicalLength>
+				<PhysicalWidth Class="CodeUnitValue">
+					<Code><![CDATA[1]]></Code>
+					<Unit Class="LengthUnits"><![CDATA[METER]]></Unit>
+				</PhysicalWidth>
+				<PhysicalHeight Class="CodeUnitValue">
+					<Code><![CDATA[1]]></Code>
+					<Unit Class="LengthUnits"><![CDATA[METER]]></Unit>
+				</PhysicalHeight>
+			</AgentProperties>
+			<EnvironmentProperties>
+					<EnableSteps>false</EnableSteps>
+					<StepDurationCode Class="CodeUnitValue">
+						<Code><![CDATA[1.0]]></Code>
+						<Unit Class="TimeUnits"><![CDATA[SECOND]]></Unit>
+					</StepDurationCode>
+					<SpaceType>CONTINUOUS</SpaceType>
+					<WidthCode><![CDATA[500]]></WidthCode>
+					<HeightCode><![CDATA[500]]></HeightCode>
+					<ZHeightCode><![CDATA[0]]></ZHeightCode>
+					<ColumnsCountCode><![CDATA[100]]></ColumnsCountCode>
+					<RowsCountCode><![CDATA[100]]></RowsCountCode>
+					<NeigborhoodType>MOORE</NeigborhoodType>
+					<LayoutType>USER_DEF</LayoutType>
+					<NetworkType>USER_DEF</NetworkType>
+					<ConnectionsPerAgentCode><![CDATA[2]]></ConnectionsPerAgentCode>
+					<ConnectionsRangeCode><![CDATA[50]]></ConnectionsRangeCode>
+					<NeighborLinkFractionCode><![CDATA[0.95]]></NeighborLinkFractionCode>
+					<MCode><![CDATA[10]]></MCode>
+			</EnvironmentProperties>
+			<DatasetsCreationProperties>
+				<AutoCreate>true</AutoCreate>
+					<Id>1777266202198</Id>
+					<OccurrenceAtTime>true</OccurrenceAtTime>
+					<OccurrenceDate>1777276800000</OccurrenceDate>
+					<OccurrenceTime Class="CodeUnitValue">
+						<Code><![CDATA[0]]></Code>
+						<Unit Class="TimeUnits"><![CDATA[MINUTE]]></Unit>
+					</OccurrenceTime>
+					<RecurrenceCode Class="CodeUnitValue">
+						<Code><![CDATA[1]]></Code>
+						<Unit Class="TimeUnits"><![CDATA[MINUTE]]></Unit>
+					</RecurrenceCode>
+			</DatasetsCreationProperties>
+			<ScaleRuler>
+				<Id>1777266202202</Id>
+				<Name><![CDATA[scale]]></Name>
+				<X>0</X><Y>-150</Y>
+				<PublicFlag>false</PublicFlag>
+				<PresentationFlag>false</PresentationFlag>
+				<ShowLabel>false</ShowLabel>
+				<DrawMode>SHAPE_DRAW_2D3D</DrawMode>
+				<Length>100</Length>
+				<Rotation>0</Rotation>
+				<ScaleType>BASED_ON_LENGTH</ScaleType>
+				<ModelLength>10</ModelLength>
+				<LengthUnits>METER</LengthUnits>
+				<Scale>10</Scale>
+				<InheritedFromParentAgentType>true</InheritedFromParentAgentType>
+			</ScaleRuler>
+			<CurrentLevel>1777266202205</CurrentLevel>
+			<ConnectionsId>1777266202200</ConnectionsId>
+			<Variables>
+				<Variable Class="PlainVariable">
+					<Id>1777267350197</Id>
+					<Name><![CDATA[trafficMatrix]]></Name>
+					<X>50</X><Y>190</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" Constant="false" AccessType="public" StaticVariable="false">
+						<Type><![CDATA[double[][]]]></Type>        
+						<InitialValue Class="CodeValue">
+							<Code><![CDATA[new double[N][N]]]></Code>
+						</InitialValue>
+					</Properties>
+				</Variable>
+				<Variable Class="PlainVariable">
+					<Id>1777267420559</Id>
+					<Name><![CDATA[eventMultiplier]]></Name>
+					<X>180</X><Y>190</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" Constant="false" AccessType="public" StaticVariable="false">
+						<Type><![CDATA[double[][]]]></Type>        
+						<InitialValue Class="CodeValue">
+							<Code><![CDATA[new double[N][N]]]></Code>
+						</InitialValue>
+					</Properties>
+				</Variable>
+				<Variable Class="PlainVariable">
+					<Id>1777267460846</Id>
+					<Name><![CDATA[eventTtl]]></Name>
+					<X>340</X><Y>190</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" Constant="false" AccessType="public" StaticVariable="false">
+						<Type><![CDATA[int[][]]]></Type>        
+						<InitialValue Class="CodeValue">
+							<Code><![CDATA[new int[N][N]]]></Code>
+						</InitialValue>
+					</Properties>
+				</Variable>
+				<Variable Class="PlainVariable">
+					<Id>1777267505663</Id>
+					<Name><![CDATA[burstState]]></Name>
+					<X>460</X><Y>190</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" Constant="false" AccessType="public" StaticVariable="false">
+						<Type><![CDATA[double[][]]]></Type>        
+						<InitialValue Class="CodeValue">
+							<Code><![CDATA[new double[N][N]]]></Code>
+						</InitialValue>
+					</Properties>
+				</Variable>
+				<Variable Class="PlainVariable">
+					<Id>1777267547637</Id>
+					<Name><![CDATA[tIndex]]></Name>
+					<X>80</X><Y>240</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" Constant="false" AccessType="public" StaticVariable="false">
+						<Type><![CDATA[int]]></Type>        
+						<InitialValue Class="CodeValue">
+							<Code><![CDATA[0]]></Code>
+						</InitialValue>
+					</Properties>
+				</Variable>
+				<Variable Class="PlainVariable">
+					<Id>1777267567250</Id>
+					<Name><![CDATA[writer]]></Name>
+					<X>220</X><Y>240</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" Constant="false" AccessType="public" StaticVariable="false">
+						<Type><![CDATA[java.io.PrintWriter]]></Type>        
+					</Properties>
+				</Variable>
+				<Variable Class="Parameter">
+					<Id>1777266524323</Id>
+					<Name><![CDATA[N]]></Name>
+					<X>50</X><Y>40</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" ModificatorType="STATIC">
+						<Type><![CDATA[int]]></Type>
+						<UnitType><![CDATA[NONE]]></UnitType>
+						<SdArray>false</SdArray>
+						<DefaultValue Class="CodeValue">
+							<Code><![CDATA[23]]></Code>
+						</DefaultValue>
+						<ParameterEditor>
+							<Id>1777266524321</Id>
+							<EditorContolType>TEXT_BOX</EditorContolType>
+							<MinSliderValue><![CDATA[0]]></MinSliderValue>
+							<MaxSliderValue><![CDATA[100]]></MaxSliderValue>
+							<DelimeterType>NO_DELIMETER</DelimeterType>
+						</ParameterEditor>
+					</Properties>                 
+				</Variable>
+				<Variable Class="Parameter">
+					<Id>1777266565382</Id>
+					<Name><![CDATA[intervalMin]]></Name>
+					<X>110</X><Y>40</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" ModificatorType="STATIC">
+						<Type><![CDATA[double]]></Type>
+						<UnitType><![CDATA[NONE]]></UnitType>
+						<SdArray>false</SdArray>
+						<DefaultValue Class="CodeValue">
+							<Code><![CDATA[15.0]]></Code>
+						</DefaultValue>
+						<ParameterEditor>
+							<Id>1777266565380</Id>
+							<EditorContolType>TEXT_BOX</EditorContolType>
+							<MinSliderValue><![CDATA[0]]></MinSliderValue>
+							<MaxSliderValue><![CDATA[100]]></MaxSliderValue>
+							<DelimeterType>NO_DELIMETER</DelimeterType>
+						</ParameterEditor>
+					</Properties>                 
+				</Variable>
+				<Variable Class="Parameter">
+					<Id>1777266570249</Id>
+					<Name><![CDATA[simulationDays]]></Name>
+					<X>240</X><Y>40</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" ModificatorType="STATIC">
+						<Type><![CDATA[double]]></Type>
+						<UnitType><![CDATA[NONE]]></UnitType>
+						<SdArray>false</SdArray>
+						<DefaultValue Class="CodeValue">
+							<Code><![CDATA[21]]></Code>
+						</DefaultValue>
+						<ParameterEditor>
+							<Id>1777266570247</Id>
+							<EditorContolType>TEXT_BOX</EditorContolType>
+							<MinSliderValue><![CDATA[0]]></MinSliderValue>
+							<MaxSliderValue><![CDATA[100]]></MaxSliderValue>
+							<DelimeterType>NO_DELIMETER</DelimeterType>
+						</ParameterEditor>
+					</Properties>                 
+				</Variable>
+				<Variable Class="Parameter">
+					<Id>1777266573996</Id>
+					<Name><![CDATA[eventProbability]]></Name>
+					<X>390</X><Y>40</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" ModificatorType="STATIC">
+						<Type><![CDATA[double]]></Type>
+						<UnitType><![CDATA[NONE]]></UnitType>
+						<SdArray>false</SdArray>
+						<ParameterEditor>
+							<Id>1777266573994</Id>
+							<EditorContolType>TEXT_BOX</EditorContolType>
+							<MinSliderValue><![CDATA[0]]></MinSliderValue>
+							<MaxSliderValue><![CDATA[100]]></MaxSliderValue>
+							<DelimeterType>SEPARATOR</DelimeterType>
+						</ParameterEditor>
+					</Properties>                 
+				</Variable>
+				<Variable Class="Parameter">
+					<Id>1777266577369</Id>
+					<Name><![CDATA[seed]]></Name>
+					<X>540</X><Y>40</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties SaveInSnapshot="true" ModificatorType="STATIC">
+						<Type><![CDATA[long]]></Type>
+						<UnitType><![CDATA[NONE]]></UnitType>
+						<SdArray>false</SdArray>
+						<DefaultValue Class="CodeValue">
+							<Code><![CDATA[7]]></Code>
+						</DefaultValue>
+						<ParameterEditor>
+							<Id>1777266577367</Id>
+							<EditorContolType>TEXT_BOX</EditorContolType>
+							<MinSliderValue><![CDATA[0]]></MinSliderValue>
+							<MaxSliderValue><![CDATA[100]]></MaxSliderValue>
+							<DelimeterType>NO_DELIMETER</DelimeterType>
+						</ParameterEditor>
+					</Properties>                 
+				</Variable>
+				<Variable Class="Parameter">
+					<Id>1888000000001</Id>
+					<Name><![CDATA[enableLstmCalls]]></Name>
+					<X>650</X><Y>40</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties Constant="false" AccessType="public" StaticVariable="false">
+						<Type><![CDATA[boolean]]></Type>
+						<DefaultValue Class="CodeValue">
+							<Code><![CDATA[true]]></Code>
+						</DefaultValue>
+						<ParameterArrayType>NONE</ParameterArrayType>
+						<ParameterArraySize Class="CodeValue">
+							<Code><![CDATA[1]]></Code>
+						</ParameterArraySize>
+						<TypeArguments/>
+						<Editor>
+							<TitleCode><![CDATA[Enable LSTM calls]]></TitleCode>
+							<EditorControlType>DEFAULT</EditorControlType>
+						</Editor>
+					</Properties>
+				</Variable>
+				<Variable Class="Parameter">
+					<Id>1888000000002</Id>
+					<Name><![CDATA[lstmServiceUrl]]></Name>
+					<X>790</X><Y>40</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties Constant="false" AccessType="public" StaticVariable="false">
+						<Type><![CDATA[String]]></Type>
+						<DefaultValue Class="CodeValue">
+							<Code><![CDATA["http://127.0.0.1:8765"]]></Code>
+						</DefaultValue>
+						<ParameterArrayType>NONE</ParameterArrayType>
+						<ParameterArraySize Class="CodeValue">
+							<Code><![CDATA[1]]></Code>
+						</ParameterArraySize>
+						<TypeArguments/>
+						<Editor>
+							<TitleCode><![CDATA[LSTM service URL]]></TitleCode>
+							<EditorControlType>DEFAULT</EditorControlType>
+						</Editor>
+					</Properties>
+				</Variable>
+				<Variable Class="Parameter">
+					<Id>1888000000003</Id>
+					<Name><![CDATA[qosStrategy]]></Name>
+					<X>930</X><Y>40</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties Constant="false" AccessType="public" StaticVariable="false">
+						<Type><![CDATA[String]]></Type>
+						<DefaultValue Class="CodeValue">
+							<Code><![CDATA["Hybrid"]]></Code>
+						</DefaultValue>
+						<ParameterArrayType>NONE</ParameterArrayType>
+						<ParameterArraySize Class="CodeValue">
+							<Code><![CDATA[1]]></Code>
+						</ParameterArraySize>
+						<TypeArguments/>
+						<Editor>
+							<TitleCode><![CDATA[QoS strategy (NoAction|RateLimit|Reroute|Hybrid)]]></TitleCode>
+							<EditorControlType>DEFAULT</EditorControlType>
+						</Editor>
+					</Properties>
+				</Variable>
+			</Variables>
+			<Events>
+				<Event>
+					<Id>1777267711297</Id>
+					<Name><![CDATA[slotTick]]></Name>
+					<X>200</X><Y>310</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Properties TriggerType="timeout" Mode="cyclic">
+						<Timeout Class="CodeUnitValue">
+							<Code><![CDATA[1]]></Code>
+							<Unit Class="TimeUnits"><![CDATA[MINUTE]]></Unit>
+						</Timeout>
+						<Rate Class="CodeUnitValue">
+							<Code><![CDATA[1]]></Code>
+							<Unit Class="RateUnits"><![CDATA[PER_MINUTE]]></Unit>
+						</Rate>
+						<Id>1777267711295</Id>
+						<OccurrenceAtTime>true</OccurrenceAtTime>
+						<OccurrenceDate>1777276800000</OccurrenceDate>
+						<OccurrenceTime Class="CodeUnitValue">
+							<Code><![CDATA[0]]></Code>
+							<Unit Class="TimeUnits"><![CDATA[MINUTE]]></Unit>
+						</OccurrenceTime>
+						<RecurrenceCode Class="CodeUnitValue">
+							<Code><![CDATA[intervalMin]]></Code>
+							<Unit Class="TimeUnits"><![CDATA[MINUTE]]></Unit>
+						</RecurrenceCode>
+						<Condition><![CDATA[false]]></Condition>
+					</Properties>
+					<Action><![CDATA[onSlotTick();]]></Action>
+				</Event>
+			</Events>
+			<Functions>
+				<Function AccessType="default" StaticFunction="false">
+					<ReturnModificator>VOID</ReturnModificator>
+					<ReturnType><![CDATA[double]]></ReturnType>
+					<Id>1777326694833</Id>
+					<Name><![CDATA[onSlotTick]]></Name>
+					<X>40</X><Y>390</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Body><![CDATA[// =========================================================
+// onSlotTick — one tick = one 15-minute slot.
+//
+// Closed-loop pipeline:
+//   1. age out any active flash-crowd events
+//   2. (maybe) trigger a new flash-crowd
+//   3. generate THIS slot's raw traffic matrix (pre-QoS)
+//   4. ask the LSTM service for predicted-overloaded destinations
+//   5. apply QoS to this slot's matrix (post-QoS = what flows)
+//   6. write the post-QoS matrix to CSV
+// =========================================================
+
+// stop after the configured number of days
+if (tIndex >= simulationDays * 24 * 60 / intervalMin) return;
+
+// 1. Advance event TTLs
+for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+        if (eventTtl[i][j] > 0) eventTtl[i][j]--;
+        if (eventTtl[i][j] == 0) eventMultiplier[i][j] = 1.0;
+    }
+}
+
+// 2. Possibly trigger a flash-crowd event (amplify inbound traffic to a dest)
+if (rng.nextDouble() < eventProbability) {
+    int dst      = rng.nextInt(N);
+    int duration = 2 + rng.nextInt(6);            // 2..7 slots
+    double mult  = 1.8 + 1.7 * rng.nextDouble();   // 1.8..3.5x
+    for (int i = 0; i < N; i++) {
+        if (i == dst) continue;
+        eventMultiplier[i][dst] = mult;
+        eventTtl[i][dst]        = duration;
+    }
+    traceln("[t=" + tIndex + "] flash-crowd event → dest=" + dst
+            + "  mult=" + String.format("%.2f", mult)
+            + "  dur=" + duration);
+}
+
+// 3. Compute current traffic matrix (this fills `trafficMatrix`)
+generateTrafficForSlot();
+
+// 3b. Snapshot the raw, pre-QoS matrix so we can compare before/after
+for (int i = 0; i < N; i++)
+    System.arraycopy(trafficMatrix[i], 0, rawTrafficMatrix[i], 0, N);
+
+// 4. Call the prediction service — fills `overloadedDests`
+overloadedDests.clear();
+if (enableLstmCalls) callPredictionService();
+
+// 5. Slot-level overflow on the raw (pre-QoS) matrix
+double[] inboundRaw = new double[N];
+for (int i = 0; i < N; i++)
+    for (int j = 0; j < N; j++)
+        inboundRaw[j] += rawTrafficMatrix[i][j];
+double slotOverflowBefore = 0.0;
+for (int j = 0; j < N; j++) {
+    double cap = nodeCapacity(j);
+    if (inboundRaw[j] > cap) slotOverflowBefore += inboundRaw[j] - cap;
+}
+overflowBefore += slotOverflowBefore;
+
+// 6. Apply QoS to the flagged destinations (modifies `trafficMatrix` in place)
+if (!overloadedDests.isEmpty()) applyQosAction();
+
+// 7. Slot-level overflow on the post-QoS matrix
+double[] inboundPost = new double[N];
+for (int i = 0; i < N; i++)
+    for (int j = 0; j < N; j++)
+        inboundPost[j] += trafficMatrix[i][j];
+double slotOverflowAfter = 0.0;
+for (int j = 0; j < N; j++) {
+    double cap = nodeCapacity(j);
+    if (inboundPost[j] > cap) slotOverflowAfter += inboundPost[j] - cap;
+}
+overflowAfter += slotOverflowAfter;
+if (slotOverflowBefore > slotOverflowAfter + 1e-9) congestionEventsAvoided++;
+
+// 8. Write the post-QoS matrix to CSV — this is the closed loop's output
+writeCsvRow();
+
+// 9. Progress log
+if (tIndex % 100 == 0) {
+    traceln("slot " + tIndex + "  ok=" + lstmCallsOk + "  fail=" + lstmCallsFailed
+            + "  qos=" + qosActionsTotal
+            + "  before=" + String.format(java.util.Locale.US, "%.2f", overflowBefore)
+            + "  after="  + String.format(java.util.Locale.US, "%.2f", overflowAfter));
+}
+tIndex++;]]></Body>
+				</Function>
+				<Function AccessType="default" StaticFunction="false">
+					<ReturnModificator>VOID</ReturnModificator>
+					<ReturnType><![CDATA[double]]></ReturnType>
+					<Id>1777326908547</Id>
+					<Name><![CDATA[generateTrafficForSlot]]></Name>
+					<X>180</X><Y>390</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Body><![CDATA[// Hour and day-of-week from tIndex
+double totalMinutes   = tIndex * intervalMin;
+double hour           = (totalMinutes / 60.0) % 24.0;
+int    dayOfWeek      = ((int)(totalMinutes / (60.0 * 24.0))) % 7;
+
+// Diurnal: cosine peak at 14:00, range ~[0.3, 1.3]
+double diurnal = 0.8 + 0.5 * Math.cos((hour - 14.0) * Math.PI / 12.0);
+// Weekly: 0.7 on weekend (Sat=5, Sun=6), 1.0 on weekday
+double weekly  = (dayOfWeek >= 5) ? 0.7 : 1.0;
+
+for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+        if (i == j) { trafficMatrix[i][j] = 0.0; continue; }
+
+        // AR(1) burst state update
+        double innov = NOISE_SD * 0.5 * rng.nextGaussian();
+        burstState[i][j] = BURST_AR * burstState[i][j] + innov;
+
+        // Multiplicative Gaussian noise
+        double noise = 1.0 + NOISE_SD * rng.nextGaussian();
+
+        double y = baseMatrix[i][j] * diurnal * weekly * noise * eventMultiplier[i][j];
+        if (burstState[i][j] > 0) y += burstState[i][j];
+        if (y < 0) y = 0;
+        trafficMatrix[i][j] = y;
+    }
+}]]></Body>
+				</Function>
+				<Function AccessType="default" StaticFunction="false">
+					<ReturnModificator>VOID</ReturnModificator>
+					<ReturnType><![CDATA[double]]></ReturnType>
+					<Id>1777326985644</Id>
+					<Name><![CDATA[writeCsvRow]]></Name>
+					<X>380</X><Y>390</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Body><![CDATA[if (writer == null) return;
+
+// ISO timestamp based on tIndex * intervalMin minutes offset from start
+long millis = (long)(tIndex * intervalMin * 60.0 * 1000.0);
+java.time.LocalDateTime ts =
+        java.time.LocalDateTime.of(2025, 1, 1, 0, 0).plusMinutes((long)(tIndex * intervalMin));
+
+StringBuilder sb = new StringBuilder();
+sb.append(tIndex).append(",").append(ts.toString());
+for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+        sb.append(",").append(String.format(java.util.Locale.US, "%.6f", trafficMatrix[i][j]));
+    }
+}
+writer.println(sb.toString());
+// flush every 50 rows to bound memory
+if (tIndex % 50 == 0) writer.flush();]]></Body>
+				</Function>
+				<Function AccessType="default" StaticFunction="false">
+					<ReturnModificator>VOID</ReturnModificator>
+					<ReturnType><![CDATA[double]]></ReturnType>
+					<Id>1777327021166</Id>
+					<Name><![CDATA[openCsv]]></Name>
+					<X>90</X><Y>440</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Body><![CDATA[try {
+    java.io.File f = new java.io.File("traffic_matrix.csv").getAbsoluteFile();
+    writer = new java.io.PrintWriter(new java.io.FileWriter(f, false));
+    // header
+    StringBuilder hdr = new StringBuilder("t_index,timestamp");
+    for (int i = 0; i < N; i++)
+        for (int j = 0; j < N; j++)
+            hdr.append(",y_").append(i).append("_").append(j);
+    writer.println(hdr.toString());
+    writer.flush();
+    traceln("opened CSV at " + f.getAbsolutePath());
+} catch (Exception e) {
+    traceln("CSV open failed: " + e.getMessage());
+}]]></Body>
+				</Function>
+				<Function AccessType="default" StaticFunction="false">
+					<ReturnModificator>VOID</ReturnModificator>
+					<ReturnType><![CDATA[double]]></ReturnType>
+					<Id>1777327055452</Id>
+					<Name><![CDATA[closeCsv]]></Name>
+					<X>260</X><Y>440</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Body><![CDATA[if (writer != null) {
+    writer.flush();
+    writer.close();
+    writer = null;
+    traceln("closed CSV");
+}]]></Body>
+				</Function>
+			
+				<Function AccessType="default" StaticFunction="false">
+					<ReturnModificator>VOID</ReturnModificator>
+					<ReturnType><![CDATA[double]]></ReturnType>
+					<Id>1888100000001</Id>
+					<Name><![CDATA[callPredictionService]]></Name>
+					<X>540</X><Y>390</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Body><![CDATA[// POST the raw traffic vector to /ingest. Service returns prediction +
+// congestion_flags. We parse destination indices into `overloadedDests`.
+// Any failure leaves overloadedDests empty so the simulation keeps running.
+
+StringBuilder body = new StringBuilder("{\"vector\":[");
+boolean first = true;
+for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+        if (!first) body.append(",");
+        body.append(String.format(java.util.Locale.US, "%.6f", rawTrafficMatrix[i][j]));
+        first = false;
+    }
+}
+body.append("],\"timestamp\":").append((double) tIndex);
+body.append(",\"do_partial_fit\":true}");
+
+try {
+    java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+            .uri(java.net.URI.create(lstmServiceUrl + "/ingest"))
+            .timeout(httpTimeout)
+            .header("Content-Type", "application/json")
+            .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body.toString()))
+            .build();
+    java.net.http.HttpResponse<String> resp =
+            httpClient.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+    if (resp.statusCode() / 100 != 2) {
+        lstmCallsFailed++;
+        if (lstmCallsFailed <= 3)
+            traceln("[t=" + tIndex + "] LSTM HTTP " + resp.statusCode());
+        return;
+    }
+    String json = resp.body();
+    int flagsStart = json.indexOf("\"congestion_flags\"");
+    if (flagsStart >= 0) {
+        int arrOpen  = json.indexOf("[", flagsStart);
+        int arrClose = matchingBracket(json, arrOpen);
+        if (arrOpen >= 0 && arrClose > arrOpen) {
+            String flagsArr = json.substring(arrOpen + 1, arrClose);
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                    "\"destination\"\\s*:\\s*(\\d+)").matcher(flagsArr);
+            while (m.find()) {
+                overloadedDests.add(Integer.parseInt(m.group(1)));
+            }
+        }
+    }
+    lstmCallsOk++;
+} catch (Exception e) {
+    lstmCallsFailed++;
+    if (lstmCallsFailed <= 3)
+        traceln("[t=" + tIndex + "] LSTM call failed: " + e.getMessage());
+}]]></Body>
+				</Function>
+				<Function AccessType="default" StaticFunction="false">
+					<ReturnModificator>VOID</ReturnModificator>
+					<ReturnType><![CDATA[double]]></ReturnType>
+					<Id>1888100000002</Id>
+					<Name><![CDATA[applyQosAction]]></Name>
+					<X>700</X><Y>390</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Body><![CDATA[// Modify `trafficMatrix` in place based on the chosen QoS strategy.
+//   NoAction   \u2014 do nothing (sanity check)
+//   RateLimit  \u2014 throttle inbound to flagged dests by 50%
+//   Reroute    \u2014 shift 30% of flagged-dest inbound to the least-loaded peer
+//   Hybrid     \u2014 reroute first; rate-limit anything still overloaded
+
+if (overloadedDests.isEmpty()) return;
+
+final double THROTTLE = 0.5;
+final double REROUTE  = 0.30;
+
+double[] inbound = new double[N];
+for (int i = 0; i < N; i++)
+    for (int j = 0; j < N; j++)
+        inbound[j] += trafficMatrix[i][j];
+
+if (qosStrategy.equalsIgnoreCase("NoAction")) return;
+
+if (qosStrategy.equalsIgnoreCase("Reroute") || qosStrategy.equalsIgnoreCase("Hybrid")) {
+    java.util.Set<Integer> overSet = new java.util.HashSet<Integer>(overloadedDests);
+    for (int j : overloadedDests) {
+        int alt = -1;
+        double minLoad = Double.POSITIVE_INFINITY;
+        for (int k = 0; k < N; k++) {
+            if (k == j || overSet.contains(k)) continue;
+            if (inbound[k] < minLoad) { minLoad = inbound[k]; alt = k; }
+        }
+        if (alt < 0) continue;
+        for (int i = 0; i < N; i++) {
+            double moved = trafficMatrix[i][j] * REROUTE;
+            trafficMatrix[i][j]   -= moved;
+            trafficMatrix[i][alt] += moved;
+        }
+        inbound[alt] += inbound[j] * REROUTE;
+        inbound[j]   -= inbound[j] * REROUTE;
+        qosActionsTotal++;
+    }
+}
+
+if (qosStrategy.equalsIgnoreCase("RateLimit") || qosStrategy.equalsIgnoreCase("Hybrid")) {
+    for (int k = 0; k < N; k++) inbound[k] = 0;
+    for (int i = 0; i < N; i++)
+        for (int j = 0; j < N; j++)
+            inbound[j] += trafficMatrix[i][j];
+    for (int j : overloadedDests) {
+        if (inbound[j] <= nodeCapacity(j) * 0.95) continue;
+        for (int i = 0; i < N; i++) trafficMatrix[i][j] *= THROTTLE;
+        qosActionsTotal++;
+    }
+}]]></Body>
+				</Function>
+				<Function AccessType="default" StaticFunction="false">
+					<ReturnModificator>NONE</ReturnModificator>
+					<ReturnType><![CDATA[double]]></ReturnType>
+					<Id>1888100000003</Id>
+					<Name><![CDATA[nodeCapacity]]></Name>
+					<X>860</X><Y>390</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Parameters>
+						<Parameter>
+							<Id>1888100000004</Id>
+							<Name><![CDATA[j]]></Name>
+							<Type><![CDATA[int]]></Type>
+						</Parameter>
+					</Parameters>
+					<Body><![CDATA[// Per-node capacity used for slot-level overflow accounting.
+// Flat heuristic capacity proportional to node population, with a floor.
+double base = (nodePopulation != null && j < nodePopulation.length) ? nodePopulation[j] : 0.5;
+return Math.max(0.5, base * 3.5);]]></Body>
+				</Function>
+				<Function AccessType="default" StaticFunction="false">
+					<ReturnModificator>NONE</ReturnModificator>
+					<ReturnType><![CDATA[double]]></ReturnType>
+					<Id>1888100000005</Id>
+					<Name><![CDATA[matchingBracket]]></Name>
+					<X>1020</X><Y>390</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<Parameters>
+						<Parameter>
+							<Id>1888100000006</Id>
+							<Name><![CDATA[s]]></Name>
+							<Type><![CDATA[String]]></Type>
+						</Parameter>
+						<Parameter>
+							<Id>1888100000007</Id>
+							<Name><![CDATA[openIdx]]></Name>
+							<Type><![CDATA[int]]></Type>
+						</Parameter>
+					</Parameters>
+					<Body><![CDATA[if (openIdx < 0 || openIdx >= s.length() || s.charAt(openIdx) != '[') return -1;
+int depth = 0;
+for (int i = openIdx; i < s.length(); i++) {
+    char c = s.charAt(i);
+    if (c == '[') depth++;
+    else if (c == ']') { depth--; if (depth == 0) return i; }
+}
+return -1;]]></Body>
+				</Function>
+			</Functions>
+			<AgentLinks>
+				<AgentLink>
+					<Id>1777266202200</Id>
+					<Name><![CDATA[connections]]></Name>
+					<X>50</X><Y>-50</Y>
+					<Label><X>15</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<HandleReceiveInConnections>false</HandleReceiveInConnections>
+					<AgentLinkType>COLLECTION_OF_LINKS</AgentLinkType>
+					<AgentLinkBidirectional>true</AgentLinkBidirectional>
+					<MessageType><![CDATA[Object]]></MessageType>
+					<LineStyle>SOLID</LineStyle>
+					<LineWidth>1</LineWidth>
+					<LineColor>-16777216</LineColor>
+					<LineZOrder>UNDER_AGENTS</LineZOrder>
+					<LineArrow>NONE</LineArrow>
+					<LineArrowPosition>END</LineArrowPosition>
+				</AgentLink>
+			</AgentLinks>
+
+			<EmbeddedObjects>
+				<EmbeddedObject>
+					<Id>1777267083731</Id>
+					<Name><![CDATA[nodes]]></Name>
+					<X>260</X><Y>140</Y>
+					<Label><X>-55</X><Y>-30</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<PresentationId>1777267086471</PresentationId>
+					<ActiveObjectClass>
+						<PackageName><![CDATA[networktrafficsim]]></PackageName>
+						<ClassName><![CDATA[NetworkNode]]></ClassName>
+					</ActiveObjectClass>
+					<GenericParameterSubstitute>
+						<GenericParameterSubstituteReference>
+							<PackageName><![CDATA[networktrafficsim]]></PackageName>
+							<ClassName><![CDATA[NetworkNode]]></ClassName>
+							<ItemName><![CDATA[1777266358161]]></ItemName>
+						</GenericParameterSubstituteReference>
+					</GenericParameterSubstitute>
+					<Parameters>
+					</Parameters>
+					<ReplicationFlag>true</ReplicationFlag>
+					<Replication Class="CodeValue">
+						<Code><![CDATA[N]]></Code>
+					</Replication>
+					<CollectionType>ARRAY_LIST_BASED</CollectionType>
+					<InEnvironment>true</InEnvironment>
+					<InitialLocationType>XYZ</InitialLocationType>
+					<ColumnCode Class="CodeValue">
+						<Code><![CDATA[0]]></Code>
+					</ColumnCode>
+					<RowCode Class="CodeValue">
+						<Code><![CDATA[0]]></Code>
+					</RowCode>
+					<LocationNameCode Class="CodeValue">
+						<Code><![CDATA[""]]></Code>
+					</LocationNameCode>
+					<InitializationType>SPECIFIED_NUMBER</InitializationType>
+					<InitializationDatabaseTableQuery>
+						<Id>1777267083729</Id>
+						<TableReference>
+						</TableReference>
+					</InitializationDatabaseTableQuery>
+					<InitializationDatabaseType>ONE_AGENT_PER_DATABASE_RECORD</InitializationDatabaseType>
+					<QuantityColumn>
+					</QuantityColumn>
+				</EmbeddedObject>
+			</EmbeddedObjects>
+
+			<Presentation>
+				<Level>
+					<Id>1777266202205</Id>
+					<Name><![CDATA[level]]></Name>
+					<X>0</X><Y>0</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>true</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>false</ShowLabel>
+					<DrawMode>SHAPE_DRAW_2D3D</DrawMode>
+					<Z>0</Z>
+					<LevelVisibility>DIM_NON_CURRENT</LevelVisibility>
+
+			<Presentation>
+				<EmbeddedObjectPresentation>
+					<Id>1777267086471</Id>
+					<Name><![CDATA[nodes_presentation]]></Name>
+					<X>0</X><Y>0</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>true</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>false</ShowLabel>
+					<DrawMode>SHAPE_DRAW_2D3D</DrawMode>
+					<EmbeddedIcon>false</EmbeddedIcon>
+					<Z>0</Z>
+					<Rotation>0.0</Rotation>
+					<ScaleType>AUTOMATICALLY_CALCULATED</ScaleType>
+					<GISScaleForRealEmbeddedObjectPresentationSize>1000</GISScaleForRealEmbeddedObjectPresentationSize>
+					<GISScaleForFixedEmbeddedObjectPresentationSize>1000000000</GISScaleForFixedEmbeddedObjectPresentationSize>
+					<Latitude>0.0</Latitude>
+					<Longitude>0.0</Longitude>
+				</EmbeddedObjectPresentation>
+			</Presentation>
+
+				</Level>
+			</Presentation>
+
+		</ActiveObjectClass>
+		<!--   =========   Active Object Class   ========  -->
+		<ActiveObjectClass>
+			<Id>1777266358156</Id>
+			<Name><![CDATA[NetworkNode]]></Name>
+			<AdditionalClassCode><![CDATA[public int     nodeId     = 0;
+public double  population = 1.0;
+
+// total bytes received in the current slot (reset externally if needed)
+public double  inboundThisSlot = 0.0;
+
+public void recordInboundTraffic(int origin, double volume) {
+    inboundThisSlot += volume;
+}
+
+public double drainInbound() {
+    double v = inboundThisSlot;
+    inboundThisSlot = 0.0;
+    return v;
+}
+
+@Override
+public String toString() {
+    return "Node(" + nodeId + ", pop=" + String.format("%.2f", population) + ")";
+}]]></AdditionalClassCode>
+			<Generic>false</Generic>
+			<GenericParameter>
+				<Id>1777266358161</Id>
+				<Name><![CDATA[1777266358161]]></Name>
+				<GenericParameterValue Class="CodeValue">
+					<Code><![CDATA[T extends Agent]]></Code>
+				</GenericParameterValue>
+				<GenericParameterLabel><![CDATA[Generic parameter:]]></GenericParameterLabel>
+			</GenericParameter>
+			<FlowChartsUsage>ENTITY</FlowChartsUsage>
+			<SamplesToKeep>100</SamplesToKeep>
+			<LimitNumberOfArrayElements>false</LimitNumberOfArrayElements>
+			<ElementsLimitValue>100</ElementsLimitValue>
+			<MakeDefaultViewArea>true</MakeDefaultViewArea>
+			<SceneGridColor/>
+			<SceneBackgroundColor>-4144960</SceneBackgroundColor>
+			<SceneSkybox>null</SceneSkybox>
+			<AgentProperties>
+				<EnvironmentDefinesInitialLocation>true</EnvironmentDefinesInitialLocation>
+				<RotateAnimationTowardsMovement>true</RotateAnimationTowardsMovement>
+				<RotateAnimationVertically>false</RotateAnimationVertically>
+				<VelocityCode Class="CodeUnitValue">
+					<Code><![CDATA[10]]></Code>
+					<Unit Class="SpeedUnits"><![CDATA[MPS]]></Unit>
+				</VelocityCode>
+				<PhysicalLength Class="CodeUnitValue">
+					<Code><![CDATA[1]]></Code>
+					<Unit Class="LengthUnits"><![CDATA[METER]]></Unit>
+				</PhysicalLength>
+				<PhysicalWidth Class="CodeUnitValue">
+					<Code><![CDATA[1]]></Code>
+					<Unit Class="LengthUnits"><![CDATA[METER]]></Unit>
+				</PhysicalWidth>
+				<PhysicalHeight Class="CodeUnitValue">
+					<Code><![CDATA[1]]></Code>
+					<Unit Class="LengthUnits"><![CDATA[METER]]></Unit>
+				</PhysicalHeight>
+			</AgentProperties>
+			<EnvironmentProperties>
+					<EnableSteps>false</EnableSteps>
+					<StepDurationCode Class="CodeUnitValue">
+						<Code><![CDATA[1.0]]></Code>
+						<Unit Class="TimeUnits"><![CDATA[SECOND]]></Unit>
+					</StepDurationCode>
+					<SpaceType>CONTINUOUS</SpaceType>
+					<WidthCode><![CDATA[500]]></WidthCode>
+					<HeightCode><![CDATA[500]]></HeightCode>
+					<ZHeightCode><![CDATA[0]]></ZHeightCode>
+					<ColumnsCountCode><![CDATA[100]]></ColumnsCountCode>
+					<RowsCountCode><![CDATA[100]]></RowsCountCode>
+					<NeigborhoodType>MOORE</NeigborhoodType>
+					<LayoutType>USER_DEF</LayoutType>
+					<NetworkType>USER_DEF</NetworkType>
+					<ConnectionsPerAgentCode><![CDATA[2]]></ConnectionsPerAgentCode>
+					<ConnectionsRangeCode><![CDATA[50]]></ConnectionsRangeCode>
+					<NeighborLinkFractionCode><![CDATA[0.95]]></NeighborLinkFractionCode>
+					<MCode><![CDATA[10]]></MCode>
+			</EnvironmentProperties>
+			<DatasetsCreationProperties>
+				<AutoCreate>true</AutoCreate>
+					<Id>1777266358155</Id>
+					<OccurrenceAtTime>true</OccurrenceAtTime>
+					<OccurrenceDate>1777276800000</OccurrenceDate>
+					<OccurrenceTime Class="CodeUnitValue">
+						<Code><![CDATA[0]]></Code>
+						<Unit Class="TimeUnits"><![CDATA[MINUTE]]></Unit>
+					</OccurrenceTime>
+					<RecurrenceCode Class="CodeUnitValue">
+						<Code><![CDATA[1]]></Code>
+						<Unit Class="TimeUnits"><![CDATA[MINUTE]]></Unit>
+					</RecurrenceCode>
+			</DatasetsCreationProperties>
+			<ScaleRuler>
+				<Id>1777266358159</Id>
+				<Name><![CDATA[scale]]></Name>
+				<X>0</X><Y>-150</Y>
+				<PublicFlag>false</PublicFlag>
+				<PresentationFlag>false</PresentationFlag>
+				<ShowLabel>false</ShowLabel>
+				<DrawMode>SHAPE_DRAW_2D3D</DrawMode>
+				<Length>100</Length>
+				<Rotation>0</Rotation>
+				<ScaleType>BASED_ON_LENGTH</ScaleType>
+				<ModelLength>10</ModelLength>
+				<LengthUnits>METER</LengthUnits>
+				<Scale>10</Scale>
+				<InheritedFromParentAgentType>true</InheritedFromParentAgentType>
+			</ScaleRuler>
+			<CurrentLevel>1777266358162</CurrentLevel>
+			<ConnectionsId>1777266358157</ConnectionsId>
+			<AgentLinks>
+				<AgentLink>
+					<Id>1777266358157</Id>
+					<Name><![CDATA[connections]]></Name>
+					<X>50</X><Y>-50</Y>
+					<Label><X>15</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<HandleReceiveInConnections>false</HandleReceiveInConnections>
+					<AgentLinkType>COLLECTION_OF_LINKS</AgentLinkType>
+					<AgentLinkBidirectional>true</AgentLinkBidirectional>
+					<MessageType><![CDATA[Object]]></MessageType>
+					<LineStyle>SOLID</LineStyle>
+					<LineWidth>1</LineWidth>
+					<LineColor>-16777216</LineColor>
+					<LineZOrder>UNDER_AGENTS</LineZOrder>
+					<LineArrow>NONE</LineArrow>
+					<LineArrowPosition>END</LineArrowPosition>
+				</AgentLink>
+			</AgentLinks>
+
+			<ContainerLinks>
+				<ContainerLink>
+					<Id>1777267086474</Id>
+					<Name><![CDATA[main]]></Name>
+					<X>50</X><Y>-100</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>false</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>true</ShowLabel>
+					<ActiveObjectClass>
+						<PackageName><![CDATA[networktrafficsim]]></PackageName>
+						<ClassName><![CDATA[Main]]></ClassName>
+					</ActiveObjectClass>
+				</ContainerLink>
+			</ContainerLinks>
+
+			<Presentation>
+				<Level>
+					<Id>1777266358162</Id>
+					<Name><![CDATA[level]]></Name>
+					<X>0</X><Y>0</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>true</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>false</ShowLabel>
+					<DrawMode>SHAPE_DRAW_2D3D</DrawMode>
+					<Z>0</Z>
+					<LevelVisibility>DIM_NON_CURRENT</LevelVisibility>
+
+			<Presentation>
+				<Figure3D>
+					<Id>1777266358165</Id>
+					<Name><![CDATA[person]]></Name>
+					<X>0</X><Y>0</Y>
+					<Label><X>0</X><Y>-10</Y></Label>
+					<PublicFlag>true</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>false</ShowLabel>
+					<DrawMode>SHAPE_DRAW_2D3D</DrawMode>
+					<X>0</X><Y>0</Y><Z>0</Z>
+					<Label><X>0</X><Y>-10</Y></Label>
+					<ResourceReference>
+						<PackageName><![CDATA[networktrafficsim]]></PackageName>
+						<ClassName><![CDATA[3d/person.dae]]></ClassName>
+					</ResourceReference>
+					<ColorTable>
+						<ColorMapping>
+							<Name><![CDATA[Material__3__Surf]]></Name>
+							<OriginalColor>-3355444</OriginalColor>
+						</ColorMapping>
+						<ColorMapping>
+							<Name><![CDATA[Material__5__Surf]]></Name>
+							<OriginalColor>-3355444</OriginalColor>
+						</ColorMapping>
+						<ColorMapping>
+							<Name><![CDATA[Material__6__Surf]]></Name>
+							<OriginalColor>-4083577</OriginalColor>
+						</ColorMapping>
+						<ColorMapping>
+							<Name><![CDATA[Material__2__Surf]]></Name>
+							<OriginalColor>-13355980</OriginalColor>
+						</ColorMapping>
+						<ColorMapping>
+							<Name><![CDATA[Material__4__Surf]]></Name>
+							<OriginalColor>-13355980</OriginalColor>
+						</ColorMapping>
+						<ColorMapping>
+							<Name><![CDATA[Material__1__Surf]]></Name>
+							<OriginalColor>-5279952</OriginalColor>
+						</ColorMapping>
+					</ColorTable>
+					<AutoScale>true</AutoScale>
+					<Scale>1.0</Scale>
+					<Rotation>0.0</Rotation>
+					<AxisOrder>YZX_AXIS_ORDER</AxisOrder>
+					<ApplyShading>true</ApplyShading>
+					<InternalLighting>OFF</InternalLighting>
+					<IgnoreSceneLights>false</IgnoreSceneLights>
+</Figure3D>
+			</Presentation>
+
+				</Level>
+			</Presentation>
+
+		</ActiveObjectClass>
+	</ActiveObjectClasses>
+	<DifferentialEquationsMethod>EULER</DifferentialEquationsMethod>
+	<MixedEquationsMethod>RK45_NEWTON</MixedEquationsMethod>
+	<AlgebraicEquationsMethod>MODIFIED_NEWTON</AlgebraicEquationsMethod>
+	<AbsoluteAccuracy>1.0E-5</AbsoluteAccuracy>
+	<FixedTimeStep>0.001</FixedTimeStep>
+	<RelativeAccuracy>1.0E-5</RelativeAccuracy>
+	<TimeAccuracy>1.0E-5</TimeAccuracy>
+	<InspectionWindowColorTheme>DEFAULT</InspectionWindowColorTheme>
+	<Frame>
+		<Id>1777266202197</Id>
+		<Width>1000</Width>
+		<Height>600</Height>
+	</Frame>
+	<Database>
+		<Id>1777266202196</Id>
+		<Logging>false</Logging>
+		<AutoExport>false</AutoExport>
+		<ShutdownCompact>false</ShutdownCompact>
+		<ImportSettings>
+		</ImportSettings>
+		<ExportSettings>
+		</ExportSettings>
+	</Database>
+
+	<RunConfiguration ActiveObjectClassId="1777266202199">
+		<Id>1777266202210</Id>
+		<Name><![CDATA[RunConfiguration]]></Name>
+		<MaximumMemory>512</MaximumMemory>
+		<ModelTimeProperties>
+			<StopOption><![CDATA[Stop at specified time]]></StopOption>
+			<InitialDate><![CDATA[1777248000000]]></InitialDate>	
+			<InitialTime><![CDATA[0.0]]></InitialTime>	
+			<FinalDate><![CDATA[1779840000000]]></FinalDate>	
+			<FinalTime><![CDATA[100.0]]></FinalTime>	
+		</ModelTimeProperties>
+		<AnimationProperties>
+			<StopNever>true</StopNever>
+			<ExecutionMode>realTimeScaled</ExecutionMode>
+			<RealTimeScale>1.0</RealTimeScale>
+			<EnableZoomAndPanning>true</EnableZoomAndPanning>
+			<EnableDeveloperPanel>false</EnableDeveloperPanel>
+			<ShowDeveloperPanelOnStart>false</ShowDeveloperPanelOnStart>
+		</AnimationProperties>
+		<Inputs>		
+		</Inputs>
+		<Outputs>
+		</Outputs>
+	</RunConfiguration>
+	<Experiments>
+		<!--   =========   Simulation Experiment   ========  -->
+		<SimulationExperiment ActiveObjectClassId="1777266202199">
+			<Id>1777266202207</Id>
+			<Name><![CDATA[Simulation]]></Name>
+			<CommandLineArguments><![CDATA[]]></CommandLineArguments>
+			<MaximumMemory>512</MaximumMemory>
+			<RandomNumberGenerationType>fixedSeed</RandomNumberGenerationType>
+			<CustomGeneratorCode>new Random()</CustomGeneratorCode>
+			<SeedValue>1</SeedValue>
+			<SelectionModeForSimultaneousEvents>LIFO</SelectionModeForSimultaneousEvents>
+			<VmArgs><![CDATA[]]></VmArgs>
+			<LoadRootFromSnapshot>false</LoadRootFromSnapshot>
+
+			<Presentation>
+				<Text>
+					<Id>1777266202209</Id>
+					<Name><![CDATA[text]]></Name>
+					<X>50</X><Y>30</Y>
+					<Label><X>10</X><Y>0</Y></Label>
+					<PublicFlag>true</PublicFlag>
+					<PresentationFlag>true</PresentationFlag>
+					<ShowLabel>false</ShowLabel>
+					<DrawMode>SHAPE_DRAW_2D3D</DrawMode>
+					<EmbeddedIcon>false</EmbeddedIcon>
+					<Z>0</Z>
+					<Rotation>0.0</Rotation>
+					<Color>-12490271</Color>
+					<Text><![CDATA[NetworkTrafficSim]]></Text>
+					<Font>
+						<Name>SansSerif</Name>
+						<Size>24</Size>
+						<Style>0</Style>
+					</Font>
+					<Alignment>LEFT</Alignment>
+				</Text>
+			</Presentation>
+
+			<Parameters>
+				<Parameter>
+					<ParameterName><![CDATA[N]]></ParameterName>
+				</Parameter>
+				<Parameter>
+					<ParameterName><![CDATA[intervalMin]]></ParameterName>
+				</Parameter>
+				<Parameter>
+					<ParameterName><![CDATA[simulationDays]]></ParameterName>
+				</Parameter>
+				<Parameter>
+					<ParameterName><![CDATA[eventProbability]]></ParameterName>
+				</Parameter>
+				<Parameter>
+					<ParameterName><![CDATA[seed]]></ParameterName>
+				</Parameter>
+			</Parameters>
+			<PresentationProperties>
+				<EnableZoomAndPanning>true</EnableZoomAndPanning>
+				<ExecutionMode><![CDATA[virtualTime]]></ExecutionMode>
+				<Title><![CDATA[NetworkTrafficSim : Simulation]]></Title>
+				<EnableDeveloperPanel>true</EnableDeveloperPanel>
+				<ShowDeveloperPanelOnStart>false</ShowDeveloperPanelOnStart>
+				<RealTimeScale>1.0</RealTimeScale>
+			</PresentationProperties>
+			<ModelTimeProperties>
+				<StopOption><![CDATA[Stop at specified time]]></StopOption>
+				<InitialDate><![CDATA[1777248000000]]></InitialDate>
+				<InitialTime><![CDATA[0.0]]></InitialTime>
+				<FinalDate><![CDATA[1779062400000]]></FinalDate>
+				<FinalTime><![CDATA[30240.0]]></FinalTime>
+			</ModelTimeProperties>
+			<BypassInitialScreen>true</BypassInitialScreen>
+		</SimulationExperiment>	
+	</Experiments>
+	<ModelResources>
+		<Resource>
+			<Id>1777266358166</Id>
+			<Path><![CDATA[3d/person.dae]]></Path>
+			<ReferencedFromUserCode>false</ReferencedFromUserCode>
+			<Location>FILE_SYSTEM</Location>
+		</Resource>
+	</ModelResources>
+    <RequiredLibraryReference>
+		<LibraryName><![CDATA[com.anylogic.libraries.modules.markup_descriptors]]></LibraryName>
+		<VersionMajor>1</VersionMajor>
+		<VersionMinor>0</VersionMinor>
+		<VersionBuild>0</VersionBuild>
+    </RequiredLibraryReference>
+    <RequiredLibraryReference>
+		<LibraryName><![CDATA[com.anylogic.libraries.processmodeling]]></LibraryName>
+		<VersionMajor>8</VersionMajor>
+		<VersionMinor>0</VersionMinor>
+		<VersionBuild>5</VersionBuild>
+    </RequiredLibraryReference>
+</Model>
+<ConvertersApplied>
+	<Uuid>9f7858c9-b2c8-4ead-9244-fd08833f642b</Uuid>
+	<Uuid>404652e6-561a-404c-aab2-ab7415f40ef5</Uuid>
+	<Uuid>6fd6cd57-6dfe-4fc6-be0b-c74065351957</Uuid>
+	<Uuid>3325dc48-3ad4-41e3-836f-dfd0e98fe1ed</Uuid>
+	<Uuid>bb27038a-0f3a-48bb-b235-4a44066a14aa</Uuid>
+	<Uuid>3f69ef3d-706e-41a6-8af0-11658c5eef68</Uuid>
+	<Uuid>3f6fe405-e047-4304-91d6-6eee206d1106</Uuid>
+	<Uuid>820d2b51-5b4a-48e7-b0b6-e46418e3c0f2</Uuid>
+	<Uuid>630818fa-8975-4b70-976f-03180dce01db</Uuid>
+	<Uuid>7c7e471c-004e-495e-a4ad-d840620ab38e</Uuid>
+	<Uuid>3e38ff63-1f70-4ec0-b42c-e879b146785d</Uuid>
+	<Uuid>b1eb86e4-14b3-405c-8257-56b80f1b485d</Uuid>
+	<Uuid>d55f9fb6-86bb-45ea-9db1-79cecfa0ce91</Uuid>
+	<Uuid>ab77aafd-8f02-4354-b789-928d45b1f73c</Uuid>
+	<Uuid>e4f14fd7-1c4a-42e9-b91d-db2415f475db</Uuid>
+	<Uuid>6d208120-6c7a-45a6-b411-402f18890d9b</Uuid>
+	<Uuid>1816cdd0-177c-4973-9e88-dd8b95318556</Uuid>
+	<Uuid>5c23f62f-06dc-46ad-8ead-688ec434e3e5</Uuid>
+	<Uuid>5c7d7990-3f35-41eb-ae16-d0c16098acc6</Uuid>
+	<Uuid>02a16c52-a834-4f30-b6af-a6aee51a294e</Uuid>
+	<Uuid>f0988929-2718-4984-a1b6-c1f2ce152f1f</Uuid>
+	<Uuid>1c9d9cfe-ea2b-43f9-8f62-dc31d8ed3ae1</Uuid>
+	<Uuid>34cb742a-8ba4-47a7-87e6-f2685fe69e97</Uuid>
+	<Uuid>4fe10751-c399-4752-94b7-30113ad45070</Uuid>
+	<Uuid>c13fe5ac-6466-446e-886a-12df1431b1eb</Uuid>
+	<Uuid>714f9ca2-426e-4bff-8569-2d18f58fdcf8</Uuid>
+	<Uuid>045aeb5f-1087-4ac7-9702-a49404e7f7e8</Uuid>
+	<Uuid>840e9a0a-de98-4b7d-a172-f9bbda2d6b98</Uuid>
+	<Uuid>e342358b-75ed-4812-9376-6043fb6cb473</Uuid>
+	<Uuid>f3d5ccdc-1bb3-466f-871d-f6b92a26cbb4</Uuid>
+	<Uuid>59acb6fb-561c-4038-b722-a596a748b3c7</Uuid>
+	<Uuid>be7e6726-05c0-4228-821d-a8df91aeb5bc</Uuid>
+	<Uuid>df4a6a60-9ce8-4c6c-91c0-ad5a5d732259</Uuid>
+	<Uuid>47491eb9-4606-42bd-8399-125a2b95fded</Uuid>
+	<Uuid>9b2d1306-5d19-439a-8f2c-b144dd7e22fa</Uuid>
+	<Uuid>ef421152-8732-4f97-9acb-c8e9a6890d5e</Uuid>
+	<Uuid>d48f8080-25b1-44f5-8322-7bf2712ff974</Uuid>
+	<Uuid>6c4de826-daad-4cd4-b703-51dfe803e822</Uuid>
+	<Uuid>01af22d6-6889-4e98-a3df-e6eddc40fc92</Uuid>
+	<Uuid>ea3b3dbe-cca2-4bde-957b-feaef7e18789</Uuid>
+	<Uuid>e737c8c6-b526-4f88-b89e-554e205b0614</Uuid>
+	<Uuid>efd24e87-d7f7-425f-9cb0-3ee17c7b2116</Uuid>
+	<Uuid>a62607e6-047e-4910-a1ec-5426bf9283b5</Uuid>
+	<Uuid>64dceb5b-de05-47c7-8e40-e9b293e80d75</Uuid>
+	<Uuid>8d51c652-6aee-4de8-ba03-47b289a13ec5</Uuid>
+	<Uuid>51d7b5ce-5664-4750-b1a0-fabcdc31e49a</Uuid>
+	<Uuid>6522e3af-aa9e-421c-b667-e11db73cd8ca</Uuid>
+	<Uuid>9ac073a0-7abf-4dff-826f-9c44d4780590</Uuid>
+	<Uuid>2da9c21c-adc7-405a-a36e-46fbd9dfcd42</Uuid>
+	<Uuid>fe4d1053-9c84-4221-bac7-cb489a7064ff</Uuid>
+	<Uuid>1f005f88-e6d7-4bdc-81fa-3acf4c89cf64</Uuid>
+	<Uuid>42dc5a7c-d7b1-4653-92b9-9359b46cc2d4</Uuid>
+	<Uuid>e25721a9-34f9-479c-a4c3-31f5ec9e117d</Uuid>
+	<Uuid>506d1de3-06df-4131-9e88-e43f1768e3d8</Uuid>
+	<Uuid>e6625695-25a2-43d0-9056-1e9a1a594b1e</Uuid>
+	<Uuid>91990287-4edf-4e38-aa6c-66d0e906807b</Uuid>
+	<Uuid>2216cdd0-177c-5678-9e88-dd8b95312234</Uuid>
+	<Uuid>1737c8c6-b526-4dd8-589e-ee4e205b06f4</Uuid>
+	<Uuid>6a43bef6-8b70-4253-a828-82c3ab399655</Uuid>
+	<Uuid>0a27038a-0f3a-48bb-b235-4a44066a1402</Uuid>
+	<Uuid>0a9ec2c3-5e18-4c0a-a183-fd86d9d9a08b</Uuid>
+	<Uuid>2216cdd0-177c-5678-9e88-dd8b95313334</Uuid>
+</ConvertersApplied>
+</AnyLogicWorkspace>
