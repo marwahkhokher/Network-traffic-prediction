@@ -1,0 +1,12 @@
+{
+  "model_version": 1,
+  "samples_seen_online": 0,
+  "samples_since_last_retrain": 0,
+  "last_online_loss": NaN,
+  "rolling_loss_mean": NaN,
+  "baseline_loss": null,
+  "drift_score": 0.0,
+  "drift_flagged": false,
+  "last_partial_fit_ts": null,
+  "last_reload_ts": 1778713912.4723022
+}

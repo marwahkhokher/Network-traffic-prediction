@@ -98,7 +98,7 @@ page = st.sidebar.radio(
     [
         "🏠 Overview",
         "📊 Model Comparison",
-        #"🔮 Live Prediction",""
+        "🔮 Live Prediction",""
         "🚦 Closed-Loop QoS Demo",
         "🛡️ QoS Strategies",
         #"🌐 Live Network View",
